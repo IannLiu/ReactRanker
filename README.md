@@ -18,7 +18,7 @@ ListMLE-Regression with gaussian distribution
 #### Rank-Classification:
 ListMLE-Dirichlet distribution
 
-###Note:
+### Note:
 Please cite this package if the following methods are used in your research:
 ListMLE-Regression
 ListMLE-Regression with gaussian distribution
