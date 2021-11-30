@@ -19,7 +19,7 @@ ListMLE-Regression with gaussian distribution
 ListMLE-Dirichlet distribution  
 
 ### Note:
-Please cite this package if the following methods are used in your research:  
+#### Please cite this package if the following methods are used in your research:  
 ListMLE-Regression  
 ListMLE-Regression with gaussian distribution  
 ListMLE-Dirichlet distribution  
