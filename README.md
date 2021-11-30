@@ -1,7 +1,7 @@
 # ReactRanker
 A Learning to Rank Package for Ranking Chemical Reactions
 
-### Suportted method:
+### Supportted method:
 #### PointWise:
 Regression  
 Regression with gaussian piror distribution(Data and model uncertainty)  
