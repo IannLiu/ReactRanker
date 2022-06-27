@@ -32,4 +32,4 @@ ListMLE
 UC-Listwise
 Using the key words ```mle``` to train the ListMLE model, ```listnet``` to train the ListNet model, evidential_ranking to train UC-Listwise model
 
-Note: This package is developing, the first release (v1) will happen within few months
+Note: This package is developing, the first release (v1) will be published within few months.
