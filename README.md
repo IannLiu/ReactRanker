@@ -21,15 +21,15 @@ A learning to rank (LTR) package for ranking chemical reactions. The reactions a
 Regression  
 Regression with gaussian piror distribution
 
-Using the key words ```regression``` for regression or ```gauss_regression``` for regression with gaussian piror distribution.
+Using the key words ```regression``` to train regression model or ```gauss_regression``` to train regression model with gaussian piror distribution.
 #### PairWise:
 RankNet  
-BetaNet
 
-Running the  ```regression``` for regression or ```gauss_regression``` for regression with gaussian piror distribution.
+Running the  ```main_ranknet``` script to train ranknet model
 #### ListWise:
 ListNet(@1)  
 ListMLE
-Uncertainty calibrated listwise
+UC-Listwise
+Using the key words ```mle``` to train the ListMLE model, ```listnet``` to train the ListNet model, evidential_ranking to train UC-Listwise model
 
 Note: This package is developing, the first release (v1) will happen within few months
