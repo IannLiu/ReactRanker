@@ -76,6 +76,7 @@ class NoamLR(_LRScheduler):
             self.lr = self.max_lr * (self.exponential_gamma ** (self.current_step - self.warmup_steps))
         else:  # theoretically this case should never be reached since training should stop at total_steps
             self.lr = self.final_lr
+        # print('learning rate is: ', self.lr)
 
         self.optimizer.param_groups[0]['lr'] = self.lr
 
@@ -88,17 +89,22 @@ def param_count(model: nn.Module) -> int:
     """
     return sum(param.numel() for param in model.parameters() if param.requires_grad)
 
-def build_optimizer(model: nn.Module) -> Optimizer:
+
+def build_optimizer(model: nn.Module, freeze=False) -> Optimizer:
     """
     Builds an Optimizer.
 
     :param model: The model to optimize.
-    :param args: Arguments.
+    :param freeze: Freezing parameters with grad=False.
     :return: An initialized Optimizer.
     """
-    params = [{'params': model.parameters(), 'lr': 0.0001, 'weight_decay': 0}]
+    if not freeze:
+        params = [{'params': model.parameters(), 'lr': 0.0001, 'weight_decay': 0}]
+    else:
+        params = [{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': 0.0001, 'weight_decay': 0}]
 
     return Adam(params)
+
 
 def build_lr_scheduler(optimizer:Optimizer,
                       warmup_epochs: int,

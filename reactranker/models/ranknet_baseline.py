@@ -43,8 +43,7 @@ class ReactionModel(nn.Module):
                        task_num=task_num,
                        ffn_bias=ffn_bias,
                        task_type=task_type)
-        self.activation = nn.ReLU6()
-        
+
     def forward(self,
                 r_inputs: list,
                 p1_inputs: list,
@@ -56,27 +55,29 @@ class ReactionModel(nn.Module):
 
         diff_features1 = p1_atom_features - r_atom_features
         diff_features2 = p2_atom_features - r_atom_features
-        output1 = self.activation(self.ffn(self.diff_encoder(diff_features1, p1_inputs, gpu=gpu)))
-        output2 = self.activation(self.ffn(self.diff_encoder(diff_features2, p2_inputs, gpu=gpu)))
-        
-        return torch.sigmoid(output1 - output2)
+        # for two reactions, we must ensure the results of input r1, r2 equal to that of r1, r1
+        # therefore ,features should be summed together
+        reaction_features = self.diff_encoder(diff_features1+diff_features2, r_inputs, gpu=gpu)
+        output = self.ffn(reaction_features)
+
+        return output
 
 
-def build_ranknet_baseline_model(hidden_size=300,
-                                 mpnn_depth=3,
-                                 mpnn_diff_depth=3,
-                                 ffn_depth=3,
-                                 use_bias=True,
-                                 dropout=0.2,
-                                 task_num=2,
-                                 ffn_last_layer='no_softplus'):
+def build_model(hidden_size: int = 300,
+                mpnn_depth: int = 3,
+                mpnn_diff_depth: int = 3,
+                ffn_depth: int = 3,
+                use_bias: bool = True,
+                dropout=0.2,
+                task_num: int = 2,
+                ffn_last_layer: str = 'no_softplus'):
     """
     This function is to build model for ranking reactions.
     We minimize the varibles by constrain all hidden_size, dropout, and bias to be the same one.
     For reactions, the param 'return_atom_hiddens' should always be true.
     param: ffn_last_layer: 'with_softplus' or 'no_softplus'
     """
-    if task_num == 2:
+    if task_num == 2 and ffn_last_layer != 'evidential':
         task_type = 'gaussian_' + ffn_last_layer
     elif task_num == 4:
         task_type = 'evidential_' + ffn_last_layer
@@ -98,6 +99,6 @@ def build_ranknet_baseline_model(hidden_size=300,
                           ffn_depth=ffn_depth,
                           task_num=task_num,
                           task_type=task_type)
-    
+
     return model
 

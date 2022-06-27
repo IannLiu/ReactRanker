@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.utils import shuffle
 
 from reactranker.features.featurization import BatchMolGraph, MolGraph
+from reactranker.data.scaffold import scaffold_split
 
 
 def get_time():
@@ -53,6 +54,34 @@ class get_data:
 
         self.df = df
 
+    def drop_columns(self, label_list: list, task_type: str = 'delete'):
+        """
+        Dropping columns in or out of list
+
+        :param label_list: The label of columns to be delete or keep
+        :param task_type: To keep or delete the columns of the dataframe
+        :return: A dataframe with or without selected columns
+        """
+        if self.df is None:
+            print('The dataframe have not been loaded!')
+        else:
+            df = self.df
+            labels = df.columns.values
+            print(labels)
+            if task_type == 'delete':
+                for label in label_list:
+                    if label not in labels:
+                        print('Column {} does not exist'.format(label))
+                    else:
+                        df.drop(label, 1, inplace=True)
+            if task_type == 'keep':
+                for label in labels:
+                    if label not in label_list:
+                        df.drop(label, 1, inplace=True)
+                    else:
+                        print('Column {} is kept'.format(label))
+            self.df = df
+
     def get_all_data(self):
         """
         :return: all loaded data
@@ -60,7 +89,7 @@ class get_data:
         return self.df
 
     @staticmethod
-    def shuffle_data(df, seed: int=0):
+    def shuffle_data(df, seed: int = 0):
         """
         Shuffle the data frame
 
@@ -115,6 +144,34 @@ class get_data:
 
             return train_data.reset_index(drop=True), val_data.reset_index(drop=True), test_data.reset_index(drop=True)
 
+    def scaffold_split_data(self, df=None, split_size=(0.8, 0.1, 0.1), balanced: bool = True, seed: int = 0):
+        """
+        Split the data in terms of reactants
+
+        :param df: Dataframe to be split
+        :param split_size: split size.
+        :param seed: the random shuffle state
+        :param balanced: Try to balance sizes of scaffolds in each set, rather than just putting smallest in test set.
+        :return: DataFrame for train, validate, test
+        """
+        # Seed is not used if 'balanced' is False.
+        if df is None:
+            df = self.df
+        reactant_list = df.rsmi.unique().tolist()
+        train_smi, val_smi, test_smi, train_scaffold_count, val_scaffold_count, test_scaffold_count = \
+            scaffold_split(data=reactant_list, sizes=split_size, balanced=balanced, seed=seed)
+        train_data = self.df[self.df.rsmi == train_smi[0]]
+        val_data = self.df[self.df.rsmi == val_smi[0]]
+        test_data = self.df[self.df.rsmi == test_smi[0]]
+        for smi in train_smi[1:]:
+            train_data = pd.concat([train_data, self.df[self.df.rsmi == smi]], axis=0)
+        for smi in val_smi[1:]:
+            val_data = pd.concat([val_data, self.df[self.df.rsmi == smi]], axis=0)
+        for smi in test_smi[1:]:
+            test_data = pd.concat([test_data, self.df[self.df.rsmi == smi]], axis=0)
+
+        return train_data.reset_index(drop=True), val_data.reset_index(drop=True), test_data.reset_index(drop=True)
+
 
 class DataProcessor:
     """
@@ -155,7 +212,8 @@ class DataProcessor:
 
     def generate_batch_per_query(self,
                                  df=None,
-                                 name='std_targ',
+                                 smiles_list=None,
+                                 target_name='std_targ',
                                  shuffle_query=True,
                                  shuffle_batch=True,
                                  seed=0):
@@ -163,7 +221,8 @@ class DataProcessor:
         Get the batch extracted from every query
 
         :param df: pandas.DataFrame
-        :param name: the target property
+        :param smiles_list: the smiles(of reactant and products) to be returned
+        :param target_name: the target property
         :param shuffle_query: Shuffle the query or not
         :param shuffle_batch: Shuffle batch items or not
         :param seed: The random state of shuffle
@@ -179,12 +238,16 @@ class DataProcessor:
             df_reactant = df[df.rsmi == reactant]
             if shuffle_batch:
                 df_reactant = df_reactant.sample(frac=1, random_state=seed)
-            yield df_reactant[['rsmi', 'psmi']].values, df_reactant[name].values
+            if smiles_list == None:
+                yield df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values
+            else:
+                yield df_reactant[smiles_list].values, df_reactant[target_name].values
 
     def generate_batch_querys(self,
                               df=None,
                               batch_size: int = 2,
-                              name='std_targ',
+                              smiles_list=None,
+                              target_name='std_targ',
                               shuffle_query=True,
                               shuffle_batch=True,
                               seed=0):
@@ -192,8 +255,9 @@ class DataProcessor:
         Get the batch extracted from every query
 
         :param df: pandas.DataFrame
+        :param smiles_list: the columns' name of smiles(of reactant and products) to be returned
         :param batch_size: The number of queries
-        :param name: the target property
+        :param target_name: the target property
         :param shuffle_query: Shuffle the query or not
         :param shuffle_batch: Shuffle batch items or not
         :param seed: The random state of shuffle
@@ -208,11 +272,15 @@ class DataProcessor:
         idx = 0
         smiles, targets, scope = None, None, []
         for reactant in reactants:
+            # print(reactant)
             df_reactant = df[df.rsmi == reactant]
             if shuffle_batch:
                 df_reactant = df_reactant.sample(frac=1, random_state=seed)
             scope.append(df_reactant.shape[0])
-            smile, target = df_reactant[['rsmi', 'psmi']].values, df_reactant[name].values.reshape(-1, 1)
+            if smiles_list is None:
+                smile, target = df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values.reshape(-1, 1)
+            else:
+                smile, target = df_reactant[smiles_list].values, df_reactant[target_name].values.reshape(-1, 1)
             if smiles is None:
                 smiles, targets = smile, target
             else:
@@ -225,6 +293,110 @@ class DataProcessor:
                 smiles, targets, scope = None, None, []
         if idx >= 1:
             yield smiles, targets, scope
+
+    def generate_batch_reactions(self,
+                                 df=None,
+                                 batch_size: int = 50,
+                                 smiles_list=None,
+                                 target_name='std_targ',
+                                 shuffle_query=True,
+                                 shuffle_batch=True,
+                                 seed=0):
+        """
+        Get the batch extracted from given batch size. The batch contains different queries
+        Sample reactions so that the number of reactions of the queries equal to given batch size
+
+        :param df: pandas.DataFrame
+        :param smiles_list: the columns' name of smiles(of reactant and products) to be returned
+        :param batch_size: The number of queries
+        :param target_name: the target property
+        :param shuffle_query: Shuffle the query or not
+        :param shuffle_batch: Shuffle batch items or not
+        :param seed: The random state of shuffle
+        :return: X for features, y for relavance
+        :rtype: numpy.ndarray, numpy.ndarray
+        """
+        if df is None:
+            df = self.df
+        reactants = df.rsmi.unique()
+        if shuffle_query:
+            reactants = shuffle(reactants, random_state=seed)
+        idx = batch_size
+        smiles, targets, scope = None, None, []
+        for reactant in reactants:
+            # print(reactant)
+            df_reactant = df[df.rsmi == reactant]
+            length = df_reactant.shape[0]
+            if idx - length >= 0:
+                if shuffle_batch:
+                    df_reactant = df_reactant.sample(frac=1, random_state=seed)
+                scope.append(length)
+                if smiles_list is None:
+                    smile, target = df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values.reshape(-1, 1)
+                else:
+                    smile, target = df_reactant[smiles_list].values, df_reactant[target_name].values.reshape(-1, 1)
+                if smiles is None:
+                    smiles, targets = smile, target
+                else:
+                    smiles = np.vstack((smiles, smile))
+                    targets = np.vstack((targets, target))
+                idx -= length
+                if idx < 2:
+                    yield smiles, targets, scope
+                    idx = batch_size
+                    smiles, targets, scope = None, None, []
+            else:
+                df_reactant = df_reactant.sample(n=idx, random_state=seed)
+                scope.append(idx)
+                if smiles_list is None:
+                    smile, target = df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values.reshape(-1, 1)
+                else:
+                    smile, target = df_reactant[smiles_list].values, df_reactant[target_name].values.reshape(-1, 1)
+                if smiles is None:
+                    smiles, targets = smile, target
+                else:
+                    smiles = np.vstack((smiles, smile))
+                    targets = np.vstack((targets, target))
+                yield smiles, targets, scope
+                idx = batch_size
+                smiles, targets, scope = None, None, []
+
+        if idx < batch_size:
+            yield smiles, targets, scope
+
+    def generate_batch(self,
+                       df=None,
+                       batch_size: int = 2,
+                       smiles_list=None,
+                       target_name='std_targ',
+                       shuffle_data=True,
+                       seed=0):
+        """
+        Get the batch extracted from every query
+
+        :param df: pandas.DataFrame
+        :param smiles_list: the columns' name of smiles(of reactant and products) to be returned
+        :param batch_size: The number of queries
+        :param target_name: the target property
+        :param shuffle_data: Shuffle reactions for every epoch
+        :param seed: The random state of shuffle. Usually equal to epoch_num
+        :return: X for features, y for relavance
+        :rtype: numpy.ndarray, numpy.ndarray
+        """
+        if df is None:
+            df = self.df
+        if shuffle_data:
+            df = df.sample(frac=1, random_state=seed)
+        idx = 0
+        length = df.shape[0]
+        while idx < length:
+            data = df.iloc[idx:idx+batch_size, :]
+            idx += batch_size
+            if smiles_list is None:
+                smiles, targets = data[['rsmi', 'psmi']].values, data[target_name].values.reshape(-1, 1)
+            else:
+                smiles, targets = data[smiles_list].values, data[target_name].values.reshape(-1, 1)
+            yield smiles, targets
 
     def get_num_pairs(self):
         if self.num_pairs is not None:
@@ -267,7 +439,7 @@ class DataProcessor:
             x_j.append(df_merged[['rsmi', 'psmi_y']].values)
         return np.vstack(x_i), np.vstack(y_i), np.vstack(x_j), np.vstack(y_j)
 
-    def generate_query_pair_batch(self, df=None, targ='std_targ', batchsize=2000, seed=0):
+    def generate_query_pair_batch(self, df=None, targ='std_targ', batchsize=1000, seed=0):
         """
         Generating pair batch for given batch size with queries
 
@@ -285,7 +457,6 @@ class DataProcessor:
         reactants = df.rsmi.unique()
         np.random.seed(seed)
         np.random.shuffle(reactants)
-        print(reactants)
         for reactant in reactants:
             x_i, y_i, x_j, y_j = self.generate_query_pairs(df, reactant, targ, seed)
             if x_i_buf is None:

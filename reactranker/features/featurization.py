@@ -42,7 +42,7 @@ def onek_encoding_unk(value: int, choices: List[int]) -> List[int]:
     return encoding
 
 
-elem_list = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'I', 'B', 'K']
+elem_list = ['H', 'C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'I', 'B', 'K']
 
 ATOM_FEATURES = {
     'atomic_symbol' : elem_list,
@@ -165,8 +165,10 @@ class MolGraph:
         # Require atom numbers when using reactions
         # so that activation atoms can be 
         if reaction:
-            if any(a.GetAtomMapNum() == 0 for a in mol.GetAtoms()):
-                raise Exception(f'{smiles} is missing atom map numbers')
+            # Because of some atom map number in RMG_data is 0.
+            # Following code is missed
+            # if any(a.GetAtomMapNum() == 0 for a in mol.GetAtoms()):
+            #     raise Exception(f'{smiles} is missing atom map numbers')
                 
             atoms = sorted(mol.GetAtoms(), key=lambda a: a.GetAtomMapNum())
         else:

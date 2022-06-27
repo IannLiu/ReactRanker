@@ -49,9 +49,9 @@ class StandardScaler:
         """
         
         X = np.array(X).astype(float)
-        transformed_with_nan = (X- self.means) / self.stds  #Standardization(Z-score normalization)
+        transformed_with_nan = (X- self.means) / self.stds  # Standardization(Z-score normalization)
         transformed_with_none = np.where(np.isnan(transformed_with_nan), self.replace_nan_token, transformed_with_nan)
-         #if the element is NaN, fix NaN with replace_nan_token; else, fix it with transformed_with_nan
+        # if the element is NaN, fix NaN with replace_nan_token; else, fix it with transformed_with_nan
         
         return transformed_with_none
     

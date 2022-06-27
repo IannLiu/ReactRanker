@@ -69,10 +69,10 @@ class MPN(nn.Module):
         :param features_batch: A list of ndarrays containing additional features.
         :return: A PyTorch tensor of shape (num_molecules, hidden_size) containing the encoding of each molecule.
         """
-        #print('the length of smiles is', len(smiles))
+        # print('the length of smiles is', len(smiles))
 
         f_atoms, f_bonds, a2b, b2a, b2revb, a_scope, b_scope = mol_graph.get_components()
-        #print('the length of f_atom is:', f_atoms.size())
+        # print('the length of f_atom is:', f_atoms.size())
         if gpu is not None:
             f_atoms, f_bonds, a2b, b2a, b2revb = f_atoms.cuda(gpu), f_bonds.cuda(gpu), a2b.cuda(gpu), b2a.cuda(gpu), b2revb.cuda(gpu)
 
@@ -82,7 +82,7 @@ class MPN(nn.Module):
 
         # Message passing
         for depth in range(self.depth - 1):
-            #print('for mpnn, now, the depth is:', depth)
+            # print('for mpnn, now, the depth is:', depth)
 
             # m(a1 -> a2) = [sum_{a0 \in nei(a1)} m(a0 -> a1)] - m(a2 -> a1)
             # message      a_message = sum(nei_a_message)      rev_message
@@ -96,7 +96,7 @@ class MPN(nn.Module):
             # merge input，num_bonds x hidden_size
             message = self.dropout_layer(message)  # num_bonds x hidden
         
-        #last layer, without reverse bonds
+        # last layer, without reverse bonds
         a2x = a2b
         nei_a_message = index_select_ND(message, a2x)  # num_atoms x max_num_bonds x hidden
         a_message = nei_a_message.sum(dim=1)  # num_atoms x hidden
@@ -122,7 +122,8 @@ class MPN(nn.Module):
         mol_vecs = torch.stack(mol_vecs, dim=0)  # (num_molecules, hidden_size)
 
         return mol_vecs  # num_molecules x hidden
-    
+
+
 class MPNDiff(nn.Module):
     """A message passing neural network for encoding of custom (difference) features."""
 
@@ -195,7 +196,7 @@ class MPNDiff(nn.Module):
         if self.depth > 0:
             # Message passing
             for depth in range(self.depth - 1):
-                #print('for mpnn_diff, now, the depth is:', depth)
+                # print('for mpnn_diff, now, the depth is:', depth)
                 nei_a_message = index_select_ND(message, a2a)  # num_atoms x max_num_bonds x hidden
                 nei_f_bonds = index_select_ND(f_bonds, a2b)  # num_atoms x max_num_bonds x (bond_fdim (+ atom_fdim_MPN))
 
@@ -233,6 +234,6 @@ class MPNDiff(nn.Module):
         vecs = torch.stack(vecs, dim=0)  # (num_samples, hidden_size)
         
         if features_batch is not None:
-            vecs =  torch.cat([vecs, features_batch], dim=1)
+            vecs = torch.cat([vecs, features_batch], dim=1)
 
         return vecs  # num_samples x hidden
