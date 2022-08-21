@@ -37,7 +37,8 @@ def train(model: nn.Module,
           save_metric=None,
           show_info=False,
           max_coeff=0.0001,
-          normalize_target=True):
+          normalize_target=True,
+          add_features_name=None):
     print('Note: Set fixed seed')
     torch.manual_seed(seed)
     if gpu is not None:
@@ -54,6 +55,8 @@ def train(model: nn.Module,
         score_old = float('inf')
     else:
         score_old = float(0)
+        if save_metric == 'all':
+            score_old = [0, 0, 0]
     train_len = train_data.shape[0]
     val_len = val_data.shape[0]
     data_len = train_len + val_len
@@ -171,9 +174,10 @@ def train(model: nn.Module,
         logger.info('learning rate is: {}'.format(optimizer.state_dict()['param_groups'][0]['lr']))
         model.train()
         loss = torch.FloatTensor([0])
-        for reactions_train, targets_train, scope_train in \
-                train_data_processor.generate_batch_querys(smiles_list=smiles_list, target_name='std' + target_name,
-                                                           batch_size=batch_size, seed=epoch):
+        for reactions_train, targets_train, scope_train, add_features in \
+                train_data_processor.generate_batch_reactions(smiles_list=smiles_list, target_name='std' + target_name,
+                                                           batch_size=batch_size, seed=epoch,
+                                                           add_features_name=add_features_name):
             """
             if i % 200 == 0:
                 print('the reaction smiles is:',reactions_train)
@@ -182,7 +186,7 @@ def train(model: nn.Module,
             """
             targets_train = torch.FloatTensor(targets_train).squeeze()
             r_inputs_train, p_inputs_train = smiles2graph_dic.parsing_reactions(reactions_train)
-            output = model(r_inputs_train, p_inputs_train, gpu=gpu)
+            output = model(r_inputs_train, p_inputs_train, gpu=gpu, add_features=add_features)
             if np.any(np.isnan(model.state_dict()['encoder.W_i.weight'].cpu().tolist())):
                 print('*' * 40)
                 print('the mean of encoder.W_i.weight is: ', model.state_dict()['encoder.W_i.weight'])
@@ -300,13 +304,27 @@ def train(model: nn.Module,
 
         average_score, average_pred_in_targ, average_top1_in_pred, NDCG_ = \
             ranking_metrics(model, gpu=gpu, data_processor=val_data_processor, smiles2graph_dic=smiles2graph_dic,
-                            show_info=show_info, smiles_list=smiles_list, target_name='std' + target_name)
+                            show_info=show_info, smiles_list=smiles_list, target_name='std' + target_name,
+                            add_features_name=add_features_name)
 
         # save checkpoint if loss now < loss before
         if save_metric == None or save_metric == 'average_score':
             if average_score >= score_old:
                 score_old = average_score
                 save_checkpoint(path_checkpoints, model, mean, std)
+                print('Note: the checkpint file is updated')
+        elif save_metric == 'all':
+            if average_score >= score_old[0]:
+                score_old[0] = average_score
+                save_checkpoint(path_checkpoints[0], model, mean, std)
+                print('Note: the checkpint file is updated')
+            if average_pred_in_targ >= score_old[1]:
+                score_old[1] = average_pred_in_targ
+                save_checkpoint(path_checkpoints[1], model, mean, std)
+                print('Note: the checkpint file is updated')
+            if average_top1_in_pred >= score_old[2]:
+                score_old[2] = average_top1_in_pred
+                save_checkpoint(path_checkpoints[2], model, mean, std)
                 print('Note: the checkpint file is updated')
         elif save_metric == 'average_pred_in_targ':
             if average_pred_in_targ >= score_old:

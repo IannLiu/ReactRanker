@@ -181,6 +181,7 @@ class MPNDiff(nn.Module):
         :return: A PyTorch tensor of shape (num_molecules, hidden_size) containing the encoding of each molecule.
         """
         if features_batch is not None:
+            features_batch = torch.FloatTensor(features_batch)
             if gpu is not None:
                 features_batch = features_batch.cuda(gpu)
 

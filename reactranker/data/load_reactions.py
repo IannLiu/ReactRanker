@@ -144,6 +144,28 @@ class get_data:
 
             return train_data.reset_index(drop=True), val_data.reset_index(drop=True), test_data.reset_index(drop=True)
 
+        elif split_type == 'flag':
+            flags = df.flag.unique()
+            flags_shuffle = shuffle(flags, random_state=seed)
+            rows = len(flags_shuffle)
+            split_index1 = int(rows * split_size[1])
+            split_index2 = int(rows * (split_size[2] + split_size[1]))
+            flags_val = flags_shuffle[0:split_index1]
+            flags_test = flags_shuffle[split_index1:split_index2]
+            flags_train = flags_shuffle[split_index2:rows]
+            train_data = self.df[self.df.flag == flags_train[0]]
+            val_data = self.df[self.df.flag == flags_val[0]]
+            test_data = self.df[self.df.flag == flags_test[0]]
+            for flag in flags_train[1:]:
+                train_data = pd.concat([train_data, self.df[self.df.flag == flag]], axis=0)
+            for flag in flags_val[1:]:
+                val_data = pd.concat([val_data, self.df[self.df.flag == flag]], axis=0)
+            for flag in flags_test[1:]:
+                test_data = pd.concat([test_data, self.df[self.df.flag == flag]], axis=0)
+
+            return train_data.reset_index(drop=True), val_data.reset_index(drop=True), test_data.reset_index(drop=True)
+
+
     def scaffold_split_data(self, df=None, split_size=(0.8, 0.1, 0.1), balanced: bool = True, seed: int = 0):
         """
         Split the data in terms of reactants
@@ -216,7 +238,8 @@ class DataProcessor:
                                  target_name='std_targ',
                                  shuffle_query=True,
                                  shuffle_batch=True,
-                                 seed=0):
+                                 seed=0,
+                                 add_features_name=None):
         """
         Get the batch extracted from every query
 
@@ -238,10 +261,16 @@ class DataProcessor:
             df_reactant = df[df.rsmi == reactant]
             if shuffle_batch:
                 df_reactant = df_reactant.sample(frac=1, random_state=seed)
-            if smiles_list == None:
-                yield df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values
+            if add_features_name is not None:
+                add_features = df_reactant[target_name].values
+                if len(add_features.shape) == 1:
+                    add_features = add_features.reshape(-1, 1)
             else:
-                yield df_reactant[smiles_list].values, df_reactant[target_name].values
+                add_features = None
+            if smiles_list == None:
+                yield df_reactant[['rsmi', 'psmi']].values, df_reactant[target_name].values, add_features
+            else:
+                yield df_reactant[smiles_list].values, df_reactant[target_name].values, add_features
 
     def generate_batch_querys(self,
                               df=None,
@@ -250,7 +279,9 @@ class DataProcessor:
                               target_name='std_targ',
                               shuffle_query=True,
                               shuffle_batch=True,
-                              seed=0):
+                              seed=0,
+                              add_features_name=None,
+                              use_flag=False):
         """
         Get the batch extracted from every query
 
@@ -270,7 +301,7 @@ class DataProcessor:
         if shuffle_query:
             reactants = shuffle(reactants, random_state=seed)
         idx = 0
-        smiles, targets, scope = None, None, []
+        smiles, targets, scope, add_features = None, None, [], None
         for reactant in reactants:
             # print(reactant)
             df_reactant = df[df.rsmi == reactant]
@@ -286,13 +317,21 @@ class DataProcessor:
             else:
                 smiles = np.vstack((smiles, smile))
                 targets = np.vstack((targets, target))
+            if add_features_name is not None:
+                add_feature = df_reactant[add_features_name].values
+                if len(add_feature.shape) == 1:
+                    add_feature = add_feature.reshape(-1, 1)
+                if add_features is None:
+                    add_features = add_feature
+                else:
+                    add_features = np.vstack((add_features, add_feature))
             idx += 1
             while idx >= batch_size:
-                yield smiles, targets, scope
+                yield smiles, targets, scope, add_features
                 idx = 0
-                smiles, targets, scope = None, None, []
+                smiles, targets, scope, add_features = None, None, [], None
         if idx >= 1:
-            yield smiles, targets, scope
+            yield smiles, targets, scope, add_features
 
     def generate_batch_reactions(self,
                                  df=None,
@@ -301,7 +340,8 @@ class DataProcessor:
                                  target_name='std_targ',
                                  shuffle_query=True,
                                  shuffle_batch=True,
-                                 seed=0):
+                                 seed=0,
+                                 add_features_name=None):
         """
         Get the batch extracted from given batch size. The batch contains different queries
         Sample reactions so that the number of reactions of the queries equal to given batch size
@@ -322,7 +362,7 @@ class DataProcessor:
         if shuffle_query:
             reactants = shuffle(reactants, random_state=seed)
         idx = batch_size
-        smiles, targets, scope = None, None, []
+        smiles, targets, scope, add_features = None, None, [], None
         for reactant in reactants:
             # print(reactant)
             df_reactant = df[df.rsmi == reactant]
@@ -340,11 +380,19 @@ class DataProcessor:
                 else:
                     smiles = np.vstack((smiles, smile))
                     targets = np.vstack((targets, target))
+                if add_features_name is not None:
+                    add_feature = df_reactant[add_features_name].values
+                    if len(add_feature.shape) == 1:
+                        add_feature = add_feature.reshape(-1, 1)
+                    if add_features is None:
+                        add_features = add_feature
+                    else:
+                        add_features = np.vstack((add_features, add_feature))
                 idx -= length
                 if idx < 2:
-                    yield smiles, targets, scope
+                    yield smiles, targets, scope, add_features
                     idx = batch_size
-                    smiles, targets, scope = None, None, []
+                    smiles, targets, scope, add_features = None, None, [], None
             else:
                 df_reactant = df_reactant.sample(n=idx, random_state=seed)
                 scope.append(idx)
@@ -357,12 +405,20 @@ class DataProcessor:
                 else:
                     smiles = np.vstack((smiles, smile))
                     targets = np.vstack((targets, target))
-                yield smiles, targets, scope
+                if add_features_name is not None:
+                    add_feature = df_reactant[add_features_name].values
+                    if len(add_feature.shape) == 1:
+                        add_feature = add_feature.reshape(-1, 1)
+                    if add_features is None:
+                        add_features = add_feature
+                    else:
+                        add_features = np.vstack((add_features, add_feature))
+                yield smiles, targets, scope, add_features
                 idx = batch_size
-                smiles, targets, scope = None, None, []
+                smiles, targets, scope, add_features = None, None, [], None
 
         if idx < batch_size:
-            yield smiles, targets, scope
+            yield smiles, targets, scope, add_features
 
     def generate_batch(self,
                        df=None,

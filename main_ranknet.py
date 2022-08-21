@@ -5,16 +5,19 @@ loading data and perform ranknet
 import os
 import logging
 import torch
+import pandas as pd
 from torch.utils.tensorboard import SummaryWriter
 
 from reactranker.data.load_reactions import get_data, Parsing_features
 from reactranker.models.base_model import build_model
 from reactranker.train.run_train_pairwise import run_train
 from reactranker.train.test_ranknet import test
-from reactranker.train.utils import build_optimizer, build_lr_scheduler
 
-path = r'C:\Users\5019\Desktop\ReactionRanker\model_results\picture_data\differernt_size_trans_score\b97d3_ranknet_300_ini_lr1e-5'
-data_path = 'C:\\Users\\5019\\Desktop\\data\\different_data_size\\b97d3_with_rate_300.csv'
+from reactranker.train.utils import build_optimizer, build_lr_scheduler
+path = r'input\your\save\path'
+data_path = r'input\your\data\path'
+val_data_path = None
+test_data_path = None
 if not os.path.exists(path):
     os.makedirs(path)
 log_path = path + '/output.log'
@@ -23,34 +26,48 @@ logging.basicConfig(filename=log_path,
                     format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')
 logger = logging.getLogger()
 writer = SummaryWriter(path + '/loss_writer')
-filtered_size = 3
+filter_size = user_defined
 
 data = get_data(data_path)
 data.read_data()
-data.filter_bacth(filter_szie=filtered_size)
-gpu = 1  # cuda
+data.filter_bacth(filter_szie=filter_size)
+# data.drop_columns(label_list=['rsmi', 'psmi','rsmi_mapped', 'psmi_mapped', 'ea'], task_type='keep')
+k_fold = user_defined
+gpu = user_defined  # cuda
 test_score = []
+train_strategy = 'sum_session'
 smiles2graph_dic = Parsing_features()
 
-# training parameter
-k_fold = 1
-batch_size = 2
-total_epochs = 100
-task_type = 'baseline'  # to choose loss function
-train_strategy = "sum_session"  # 'sum_session'
+batch_size = user_defined
+total_epochs = user_defined
 target_name = 'lgk'
-smiles_list = None  # ['rsmi_mapped', 'psmi_mapped']
-init_lr = 0.0001
-max_lr = 0.001
-final_lr = 0.00001
+smiles_list = ['rsmi_mapped', 'psmi_mapped']  # ['rsmi_mapped', 'psmi_mapped']
+split_strategy = 'random_flag'  # 'scaffold' or 'random'
+init_lr = user_defined
+max_lr = user_defined
+final_lr = user_defined
+save_metric = 'all'
+add_features_dim = 1
+add_features_name = 'temp'
 
-logger.info('Training data path is {}'.format(data_path))
+logger.info('Training data path is {}, and split strategy is {}'.format(data_path, split_strategy))
 logger.info('Use the {} as input smiles'.format(smiles_list))
-logger.info('filtered_size is {}'.format(filtered_size))
-logger.info('Task type is: {}, and target name is: {}'.format(task_type, target_name))
-logger.info('For pairwise, the train strategy is: {}'.format(train_strategy))
+logger.info('filtered_size is {}'.format(filter_size))
+logger.info('Task type is: {}, and target name is: {}'.format(train_strategy, target_name))
 logger.info('{} fold train with {} epochs every fold. The batch size is: {}'.format(k_fold, total_epochs, batch_size))
 logger.info('the initial, maximum, final learning rate are {}, {}, {}'.format(init_lr, max_lr, final_lr))
+logger.info('the save metric is: {},'.format(save_metric))
+logger.info('additional features is {} dim, and the name is {}'.format(add_features_dim, add_features_name))
+logger.info('torch.mean(-torch.log(targets_possibility) + uncertainty_loss + penalty)')
+logger.info('change the target possibility to negative, the score without softplus')
+
+if save_metric == 'all':
+    metric_list = ["T1", "T25_in_T25", "T25"]
+    path = [os.path.join(path, i) for i in metric_list]
+    if not os.path.exists(path[0]):
+        os.makedirs(path[0])
+        os.makedirs(path[1])
+        os.makedirs(path[2])
 
 for ii in range(k_fold):
     logging.info(
@@ -63,9 +80,32 @@ for ii in range(k_fold):
     seed = ii
     k_fold_str = str(ii) + '.pt'
     # shuffle data randomly
-    train_data, val_data, test_data = data.split_data(seed=seed)
-    path_checkpoints = os.path.join(path_checkpoints, k_fold_str)
-    train_len = len(train_data.rsmi.unique())
+    if save_metric != 'all':
+        path_checkpoints = os.path.join(path_checkpoints, k_fold_str)
+    else:
+        path_checkpoints = [os.path.join(i, k_fold_str) for i in path_checkpoints]
+
+    if val_data_path is not None and test_data_path is not None:
+        train_data = pd.read_csv(data_path)
+        val_data = pd.read_csv(val_data_path)
+        test_data = pd.read_csv(test_data_path)
+        print('this is a test flag', train_data.shape[0], val_data.shape[0], test_data.shape[0])
+    else:
+        if split_strategy == 'random':
+            train_data, val_data, test_data = data.split_data(split_size=(0.8, 0.1, 0.1), split_type='reactants',
+                                                              seed=seed)
+        elif split_strategy == 'scaffold':
+            train_data, val_data, test_data = data.scaffold_split_data(split_size=(0.8, 0.1, 0.1), balanced=True,
+                                                                       seed=seed)
+        elif split_strategy == 'random_flag':
+            train_data, val_data, test_data = data.split_data(split_size=(0.8, 0.1, 0.1), split_type='flag',
+                                                              seed=seed)
+        else:
+            raise Exception('Split strategy is unknown')
+    # train_len = len(train_data.rsmi.unique())
+    train_len = train_data.shape[0]
+    batch_size = batch_size
+    total_epochs = total_epochs
     torch.manual_seed(seed)
     if gpu is not None:
         torch.cuda.manual_seed(seed)
@@ -75,9 +115,10 @@ for ii in range(k_fold):
                         mpnn_diff_depth=3,
                         ffn_depth=3,
                         use_bias=True,
-                        dropout=0.1,
+                        dropout=0.2,
                         task_num=1,
-                        ffn_last_layer='no_softplus')
+                        ffn_last_layer='no_softplus',
+                        add_features_dim=add_features_dim)
 
     logger.info('Model Sturture')
     logger.info(model)
@@ -115,12 +156,17 @@ for ii in range(k_fold):
               writer=writer,
               logger=logger,
               smiles_list=smiles_list,
-              target_name=target_name)
+              target_name=target_name,
+              save_metric=save_metric,
+              add_features_name=add_features_name)
 
     print(path_checkpoints)
-    average_score, average_pred_in_targ, average_top1_in_pred\
-        = test(model, test_data, path_checkpoints, smiles2graph_dic, batch_size, gpu=gpu, logger=logger,
-               smiles_list=smiles_list, target_name=target_name, train_strategy=train_strategy)
-    test_score.append([average_score, average_pred_in_targ, average_top1_in_pred])
+    if save_metric == 'all':
+        test_path = path_checkpoints[0]
+    score, score3, average_pred_in_targ = test(model, test_data, test_path, smiles2graph_dic,
+                                               batch_size, gpu=gpu, logger=logger,
+                                               smiles_list=smiles_list, add_features_name=add_features_name,
+                                               target_name=target_name, train_strategy=train_strategy)
+    test_score.append([score, score3])
 print("test score for k_fold vailidation is: ", test_score)
 logger.info('test score for k_fold vailidation is: {}'.format(test_score))

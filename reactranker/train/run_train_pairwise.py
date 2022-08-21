@@ -19,7 +19,7 @@ def run_train(model: nn.Module, scheduler: _LRScheduler, train_data_ini: DataFra
               val_data_ini: DataFrame, path_checkpoints: str, optimizer, epochs: int,
               smiles2graph_dic, batch_size: int, seed: int, gpu: int, train_strategy: str = 'baseline',
               task_type: str = 'baseline', writer=SummaryWriter, logger: Logger = None,
-              smiles_list=None, target_name: str = 'ea'):
+              smiles_list=None, target_name: str = 'ea', save_metric = None, add_features_name=None):
     """
     :param val_data_ini: DataFrame
     :param train_data_ini: DataFrame
@@ -51,6 +51,8 @@ def run_train(model: nn.Module, scheduler: _LRScheduler, train_data_ini: DataFra
     val_data_processor = DataProcessor(val_data)
     smiles2graph_dic = smiles2graph_dic
     score_old = float(0)
+    if save_metric == 'all':
+        score_old = [0, 0, 0]
     loss_func = None
     if train_strategy == 'baseline':
         loss_func = torch.nn.BCELoss()
@@ -69,7 +71,8 @@ def run_train(model: nn.Module, scheduler: _LRScheduler, train_data_ini: DataFra
             epoch_loss = factorized_training_loop(
                 epoch, model, None, optimizer, scheduler,
                 smiles2graph_dic, train_data_processor, batch_size=batch_size, sigma=1.0,
-                training_algo=train_strategy, gpu=gpu, smiles_list=smiles_list, target_name='std' + target_name)
+                training_algo=train_strategy, gpu=gpu, smiles_list=smiles_list,
+                target_name='std' + target_name, add_features_name=add_features_name)
         elif task_type == 'BetaNet':
             epoch_loss = beta_dis_train_loop(epoch, model, loss_func, optimizer, scheduler,
                                              smiles2graph_dic, train_data_processor, batch_size=2, alpha0=100,
@@ -90,20 +93,32 @@ def run_train(model: nn.Module, scheduler: _LRScheduler, train_data_ini: DataFra
                 average_score, average_pred_in_targ, average_top1_in_pred = \
                     evaluate_top_scores(model, gpu, val_data_processor, smiles2graph_dic,
                                         ratio=0.25, show_info=True, smiles_list=smiles_list,
-                                        target_name='std' + target_name)
-                acc = pairwise_acc(model, gpu, val_data_processor, smiles2graph_dic,
-                                   show_info=False, smiles_list=smiles_list, target_name='std' + target_name)
+                                        target_name='std' + target_name, add_features_name=add_features_name)
+                # acc = pairwise_acc(model, gpu, val_data_processor, smiles2graph_dic,
+                #                    show_info=False, smiles_list=smiles_list, target_name='std' + target_name)
             else:
                 acc = pairwise_baseline_acc(model, gpu, val_data_processor, smiles2graph_dic, batch_size=500,
                                             show_info=True, smiles_list=None, target_name='std' + target_name)
         # save checkpoint if loss now < loss before
         if train_strategy != 'baseline':
-            if average_score >= score_old:
-                score_old = average_score
-                save_checkpoint(path_checkpoints, model, mean, std)
-                print('Note: the checkpint file is updated')
-            if writer is not None:
-                writer.add_scalar('average_score: ', average_score, epoch)
+            if save_metric == None or save_metric == 'average_score':
+                if average_score >= score_old:
+                    score_old = average_score
+                    save_checkpoint(path_checkpoints, model, mean, std)
+                    print('Note: the checkpint file is updated')
+            elif save_metric == 'all':
+                if average_score >= score_old[0]:
+                    score_old[0] = average_score
+                    save_checkpoint(path_checkpoints[0], model, mean, std)
+                    print('Note: the checkpint file is updated')
+                if average_pred_in_targ >= score_old[1]:
+                    score_old[1] = average_pred_in_targ
+                    save_checkpoint(path_checkpoints[1], model, mean, std)
+                    print('Note: the checkpint file is updated')
+                if average_top1_in_pred >= score_old[2]:
+                    score_old[2] = average_top1_in_pred
+                    save_checkpoint(path_checkpoints[2], model, mean, std)
+                    print('Note: the checkpint file is updated')
         else:
             if acc >= score_old:
                 score_old = acc
@@ -118,7 +133,7 @@ def run_train(model: nn.Module, scheduler: _LRScheduler, train_data_ini: DataFra
         else:
             logger.info('Epoch [{}/{}],train_loss,{:.4f}, average_score_top1,{:.4f}, average_pred_in_targ_top25%,{:.4f}' \
                     .format(epoch + 1, epochs, epoch_loss, average_score, average_top1_in_pred))
-            print('Epoch [{}/{}], accuracy: {:.4f}'.format(epoch + 1, epochs, acc))
+#            print('Epoch [{}/{}], accuracy: {:.4f}'.format(epoch + 1, epochs, acc))
             print('Epoch [{}/{}], average score: {:.4f}'.format(epoch + 1, epochs, average_score))
             print('Epoch [{}/{}], average_pred_in_targ_top25%: {:.4f}'.format(epoch + 1, epochs, average_pred_in_targ))
             print('Epoch [{}/{}], average_targtop1_in_predtop25%: {:.4f}'.format(epoch + 1, epochs, average_top1_in_pred))

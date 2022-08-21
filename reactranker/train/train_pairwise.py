@@ -81,13 +81,14 @@ def baseline_pairwise_training_loop(
 def factorized_training_loop(epoch, model, loss_func, optimizer, scheduler,
                              smiles2graph_dic, train_data_processor, batch_size=2, sigma=1.0,
                              training_algo='sum_session', gpu=None, smiles_list=None,
-                             target_name: str = 'ea'):
+                             target_name: str = 'ea', add_features_name=None):
 
     minibatch_loss = []
     count, loss, pairs = 0, 0, 0
     grad_batch, y_pred_batch = [], []
-    for X, Y in train_data_processor.generate_batch_per_query(smiles_list=smiles_list,
-                                                              target_name=target_name, seed=epoch):
+    for X, Y, add_features in train_data_processor.generate_batch_per_query(smiles_list=smiles_list,
+                                                                            target_name=target_name, seed=epoch,
+                                                                            add_features_name=add_features_name):
         if X is None or X.shape[0] == 0:
             continue
         rsmi = [s[0] for s in X]
@@ -110,7 +111,7 @@ def factorized_training_loop(epoch, model, loss_func, optimizer, scheduler,
             pos_pairs = pos_pairs.cuda(gpu)
             neg_pairs = neg_pairs.cuda(gpu)
 
-        y_pred = model(r_batch, p_batch, gpu=gpu)
+        y_pred = model(r_batch, p_batch, gpu=gpu, add_features=add_features)
         if len(y_pred.size()) > 1:
             y_pred = y_pred[:, 0]
         y_pred = y_pred.unsqueeze(1)
@@ -138,9 +139,11 @@ def factorized_training_loop(epoch, model, loss_func, optimizer, scheduler,
             raise ValueError("training algo {} not implemented".format(training_algo))
 
         pairs += num_pairs
-        count += 1
+        # count += 1
+        count += len(psmi)
         # This is a trick named gradient accumulation
-        if count % batch_size == 0:
+        # if count % batch_size == 0:
+        if count >= batch_size:
             loss /= pairs
             minibatch_loss.append(loss.item())
             if training_algo == 'sum_session':
@@ -153,6 +156,7 @@ def factorized_training_loop(epoch, model, loss_func, optimizer, scheduler,
             model.zero_grad()
             scheduler.step()
             loss, pairs = 0, 0  # loss used for sum_session
+            count = 0
             grad_batch, y_pred_batch = [], []  # grad_batch, y_pred_batch used for gradient_acc
 
     if pairs:

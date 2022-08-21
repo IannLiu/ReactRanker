@@ -3,6 +3,8 @@ import torch.nn as nn
 
 from .mpn import MPN, MPNDiff
 from ..features.featurization import ATOM_FDIM, BOND_FDIM
+from typing import List
+import numpy as np
 
 
 class FFN(nn.Module):
@@ -92,9 +94,8 @@ class FFN(nn.Module):
             # print(output)
             # score = torch.nn.Softplus()(score)
             # uncertain_factor = torch.nn.Sigmoid()(uncertain_factor)
-            # uncertain_factor = torch.nn.Softplus()(uncertain_factor) + min_val
-            uncertain_score = torch.nn.Softplus()(uncertain_factor)
-            self.output = torch.stack((score, uncertain_score), dim=2).view(output.size())
+            uncertain_factor = torch.nn.Softplus()(uncertain_factor) + min_val
+            self.output = torch.stack((score, uncertain_factor), dim=2).view(output.size())
         elif self.task_type == 'listnet_with_softplus':
             self.output = torch.nn.Softplus()(output)
         elif self.task_type == 'listnet_with_uncertainty':
@@ -122,7 +123,8 @@ class ReactionModel(nn.Module):
                  ffn_dropout=0.2,
                  ffn_depth: int = 3,
                  task_num: int = 2,
-                 task_type: str = 'no_softplus'):
+                 task_type: str = 'no_softplus',
+                 addtion_react_featrues: int = 0):
         super(ReactionModel, self).__init__()
         self.encoder = MPN(bond_fdim=ATOM_FDIM + BOND_FDIM,
                            atom_fdim=ATOM_FDIM,
@@ -137,7 +139,7 @@ class ReactionModel(nn.Module):
                                     MPNDiff_bias=mpnn_diff_bias,
                                     MPNDiff_depth=mpnn_diff_depth,
                                     MPNDiff_dropout=mpnn_diff_dropout)
-        self.ffn = FFN(reacvec_fdim=mpnn_diff_hidden_size,
+        self.ffn = FFN(reacvec_fdim=mpnn_diff_hidden_size+addtion_react_featrues,
                        ffn_hidden_size=ffn_hidden_size,
                        ffn_dropout=ffn_dropout,
                        ffn_num_layers=ffn_depth,
@@ -148,7 +150,8 @@ class ReactionModel(nn.Module):
     def forward(self,
                 r_inputs: list,
                 p_inputs: list,
-                gpu: int):
+                gpu: int,
+                add_features: List[np.ndarray] = None):
         r_atom_features = self.encoder.forward(r_inputs, gpu=gpu)
         p_atom_features = self.encoder.forward(p_inputs, gpu=gpu)
         """
@@ -163,7 +166,7 @@ class ReactionModel(nn.Module):
             output = self.ffn(self.diff_encoder(diff_features, p_inputs, gpu = gpu, features_batch =react_MACCS ))
         """
         diff_features = p_atom_features - r_atom_features
-        output = self.ffn(self.diff_encoder(diff_features, p_inputs, gpu=gpu))
+        output = self.ffn(self.diff_encoder(diff_features, p_inputs, gpu=gpu, features_batch=add_features))
 
         return output
 
@@ -238,7 +241,8 @@ def build_model(hidden_size: int = 300,
                 task_num: int = 2,
                 ffn_last_layer: str = 'no_softplus',
                 task_type=None,
-                bimolecule=False):
+                bimolecule=False,
+                add_features_dim=0):
     """
     This function is to build model for ranking reactions.
     We minimize the varibles by constrain all hidden_size, dropout, and bias to be the same one.
@@ -272,7 +276,8 @@ def build_model(hidden_size: int = 300,
                               ffn_dropout=dropout,
                               ffn_depth=ffn_depth,
                               task_num=task_num,
-                              task_type=task_type)
+                              task_type=task_type,
+                              addtion_react_featrues=add_features_dim)
     else:
         model = ReactionModel(mpnn_hidden_size=hidden_size,
                               mpnn_bias=use_bias,

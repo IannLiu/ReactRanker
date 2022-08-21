@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from torch import nn
 import torch.nn.functional as F
+import time
 
 # from .run_criterion import criterion
 from ..data.load_reactions import get_time
@@ -72,76 +73,34 @@ def eval_cross_entropy_loss(model, device, loader, epoch, smiles2graph_dic,
     return avg_cost
 
 
-def eval_ndcg_at_k(
-        inference_model, device, df_valid, valid_loader, batch_size, k_list, epoch, smiles2graph_dic,
-        writer=None, phase="Eval"
-):
-    # print("Eval Phase evaluate NDCG @ {}".format(k_list))
-    ndcg_metrics = {k: NDCG(k) for k in k_list}
-    qids, rels, scores = [], [], []
-    inference_model.eval()
-    with torch.no_grad():
-        for qid, rel, x in valid_loader.generate_query_batch(df_valid, batch_size):
-            if x is None or x.shape[0] == 0:
-                continue
-            rsmi = [s[0] for s in x]
-            psmi = [s[1] for s in x]
-            r_batch = smiles2graph_dic.parsing_smiles(rsmi)
-            p_batch = smiles2graph_dic.parsing_smiles(psmi)
-            y_tensor = inference_model.forward(r_batch, p_batch)
-            scores.append(y_tensor.cpu().numpy().squeeze())
-            qids.append(qid)
-            rels.append(rel)
-
-    qids = np.hstack(qids)
-    rels = np.hstack(rels)
-    scores = np.hstack(scores)
-    result_df = pd.DataFrame({'qid': qids, 'rel': rels, 'score': scores})
-    session_ndcgs = defaultdict(list)
-    for qid in result_df.qid.unique():
-        result_qid = result_df[result_df.qid == qid].sort_values('score', ascending=False)
-        rel_rank = result_qid.rel.values
-        for k, ndcg in ndcg_metrics.items():
-            if ndcg.maxDCG(rel_rank) == 0:
-                continue
-            ndcg_k = ndcg.evaluate(rel_rank)
-            if not np.isnan(ndcg_k):
-                session_ndcgs[k].append(ndcg_k)
-
-    ndcg_result = {k: np.mean(session_ndcgs[k]) for k in k_list}
-    ndcg_result_print = ", ".join(["NDCG@{}: {:.5f}".format(k, ndcg_result[k]) for k in k_list])
-    print(get_time(), "{} Phase evaluate {}".format(phase, ndcg_result_print))
-    if writer:
-        for k in k_list:
-            writer.add_scalars("metrics/NDCG@{}".format(k), {phase: ndcg_result[k]}, epoch)
-    return ndcg_result
-
-
 def evaluate_top_scores(model, gpu, data_processor, smiles2graph_dic,
-                        ratio=0.25, batch_size=2, show_info=True, smiles_list=None, target_name: str = 'ea'):
+                        ratio=0.25, batch_size=2, show_info=False, smiles_list=None,
+                        target_name: str = 'ea', add_features_name=None):
     """
     Evaluating the top one, top 3, and top 25% hit ratio
     If s_i > s_j, P_si > P_sj.
     Therefore, rank the score in order, and the highest score is the most possible one.
     """
     # run model
-    model.eval()
+    # model.eval()
     with torch.no_grad():
         score = []
         score_pred_in_targ =[]
         top1_in_pred = []
         ratio = ratio
         iter_counter = 0
-        for X, targets, scope in data_processor.generate_batch_querys(smiles_list=smiles_list,
-                                                                      target_name=target_name,
-                                                                      batch_size=batch_size,
-                                                                      shuffle_query=False,
-                                                                      shuffle_batch=False):
+        for X, targets, scope, add_features in data_processor.generate_batch_querys(smiles_list=smiles_list,
+                                                                                  target_name=target_name,
+                                                                                  batch_size=batch_size,
+                                                                                  shuffle_query=False,
+                                                                                  shuffle_batch=False,
+                                                                                  add_features_name=add_features_name):
             rsmi = [s[0] for s in X]
             psmi = [s[1] for s in X]
             r_batch_graph = smiles2graph_dic.parsing_smiles(rsmi)
             p_batch_graph = smiles2graph_dic.parsing_smiles(psmi)
-            preds = model(r_batch_graph, p_batch_graph, gpu=gpu)
+
+            preds = model(r_batch_graph, p_batch_graph, gpu=gpu, add_features=add_features)
             iter_counter += 1
             idx0 = 0
             for item0 in scope:
@@ -368,32 +327,33 @@ def cal_NDCG(preds, targets, n):
 
 
 def calculate_ndcg(model, gpu, data_processor, smiles2graph_dic, batch_size=2, NDCG_cut=0.5,
-                   show_info=True, smiles_list=None, target_name: str = 'ea', logger=None, is_order=True,
-                   means=None, stds=None):
+                   show_info=False, smiles_list=None, target_name: str = 'ea', logger=None, is_order=True,
+                   means=None, stds=None, add_features_name=None):
     """
     Evaluating the top one, top 3, and top 25% hit ratio
     If s_i > s_j, P_si > P_sj.
     Therefore, rank the score in order, and the highest score is the most possible one.
     """
     # run model
-    model.eval()
+    # model.eval()
     with torch.no_grad():
         iter_counter = 0
         NDCG_list = []
         KL_list = []
         total_order = []  # collect the true order and prediction order
         smiles_and_idx = []
-        for X, targets, scope in data_processor.generate_batch_querys(smiles_list=smiles_list,
+        for X, targets, scope, add_features in data_processor.generate_batch_querys(smiles_list=smiles_list,
                                                                       target_name=target_name,
                                                                       batch_size=batch_size,
                                                                       shuffle_query=False,
-                                                                      shuffle_batch=False):
+                                                                      shuffle_batch=False,
+                                                                      add_features_name=add_features_name):
 
             rsmi = [s[0] for s in X]
             psmi = [s[1] for s in X]
             r_batch_graph = smiles2graph_dic.parsing_smiles(rsmi)
             p_batch_graph = smiles2graph_dic.parsing_smiles(psmi)
-            preds_ini = model(r_batch_graph, p_batch_graph, gpu=gpu)
+            preds_ini = model(r_batch_graph, p_batch_graph, gpu=gpu, add_features=add_features)
             iter_counter += 1
             if show_info:
                 if iter_counter % 50 == 0:
@@ -513,7 +473,7 @@ def compute_NDCG(truth: list, pred: list):
 
 
 def ranking_metrics(model, gpu, data_processor, smiles2graph_dic,
-                    show_info=True, smiles_list=None, target_name: str = 'ea', logger=None):
+                    show_info=True, smiles_list=None, target_name: str = 'ea', logger=None, add_features_name=None):
     """
     Evaluating the top one, top 25% hit ratio, recall@25%, NDCG@1, NDCG@2, NDCG@25%, NDCG@all
     """
@@ -525,17 +485,18 @@ def ranking_metrics(model, gpu, data_processor, smiles2graph_dic,
     # run model
     model.eval()
     with torch.no_grad():
-        for X, targets in data_processor.generate_batch_per_query(smiles_list=smiles_list,
-                                                                  target_name=target_name,
-                                                                  shuffle_query=False,
-                                                                  shuffle_batch=False):
+        for X, targets, add_features in data_processor.generate_batch_per_query(smiles_list=smiles_list,
+                                                                                target_name=target_name,
+                                                                                shuffle_query=False,
+                                                                                shuffle_batch=False,
+                                                                                add_features_name=add_features_name):
             iter_counter += 1
 
             rsmi = [s[0] for s in X]
             psmi = [s[1] for s in X]
             r_batch_graph = smiles2graph_dic.parsing_smiles(rsmi)
             p_batch_graph = smiles2graph_dic.parsing_smiles(psmi)
-            preds_ini = model(r_batch_graph, p_batch_graph, gpu=gpu)
+            preds_ini = model(r_batch_graph, p_batch_graph, gpu=gpu, add_features=add_features)
             if show_info:
                 if iter_counter % 50 == 0:
                     print('the test targets is: ', targets)

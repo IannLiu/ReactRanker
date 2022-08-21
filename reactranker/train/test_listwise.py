@@ -4,11 +4,12 @@ from logging import Logger
 import torch
 from ..data.load_reactions import DataProcessor
 from .eval import evaluate_top_scores, calculate_ndcg
+import time
 
 
 def test(model, test_data,  path_checkpoints, batch_size, smiles2graph_dic,
          gpu: Union[int, str], logger: Logger = None, smiles_list=None, target_name: str = 'ea',
-         cal_ngcd=False, is_order=True, return_order=True, show_info=None):
+         cal_ngcd=False, is_order=True, return_order=True, show_info=None, add_features_name=None, task_type=None):
     logger.info('\n==========================================\n'
                 '   Now, the test section is beginning!!!   \n'
                 '==========================================')
@@ -34,26 +35,32 @@ def test(model, test_data,  path_checkpoints, batch_size, smiles2graph_dic,
             test_std_targ = test_data[target_name]  # .map(lambda x: (x - means) / stds)
         test_data['std' + target_name] = test_std_targ
     model = model
-    if gpu is not None:
-        model = model.cuda()
     model.load_state_dict(loaded_state_dict)
-    
+    if gpu is not None:
+        model = model.cuda(gpu)
     # evaluate
-    model.eval()
+    if task_type == 'MC_dropout':
+        model.train()
+    else:
+        model.eval()
+
     ratio = 0.25
     test_data_processor = DataProcessor(test_data)
     smiles2graph_dic = smiles2graph_dic
+    start_time = time.time()
     average_score, average_pred_in_targ, average_top1_in_pred = \
         evaluate_top_scores(model, gpu=gpu, data_processor=test_data_processor, smiles2graph_dic=smiles2graph_dic,
                             batch_size=batch_size, ratio=0.25, smiles_list=smiles_list, target_name='std' + target_name,
-                            show_info=show_info)
+                            show_info=show_info, add_features_name=add_features_name)
+    end_time = time.time()
+    print('the running time for one fold is: ', end_time - start_time)
 
     if cal_ngcd is True:
         NDCG_cut = 0.25
         ndcg, KL_div, order, smiles_and_index\
             = calculate_ndcg(model, gpu=gpu, data_processor=test_data_processor, smiles2graph_dic=smiles2graph_dic,
                              batch_size=batch_size, NDCG_cut=NDCG_cut, smiles_list=smiles_list, target_name='std' + target_name,
-                             is_order=is_order, means=means, stds=stds)
+                             is_order=is_order, means=means, stds=stds, add_features_name=add_features_name)
 
 
     print('==========================================')

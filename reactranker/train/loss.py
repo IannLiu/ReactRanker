@@ -546,7 +546,7 @@ class evidential_ranking(nn.Module):
 
             # loss = torch.mean(0.1 * uncertainty_loss + KLDiv_los)
             # loss = torch.mean(uncertainty_loss + KLDiv_los + penalty)
-            loss = torch.mean(torch.log(targets_possibility) + uncertainty_loss + penalty)
+            loss = torch.mean(-torch.log(targets_possibility) + uncertainty_loss + penalty)
             # loss = torch.mean(targets_possibility * uncertainty_loss)
 
             losses += loss

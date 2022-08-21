@@ -16,7 +16,8 @@ def test(model: nn.Module,
          logger: Logger = None,
          smiles_list: list = None,
          target_name='ea',
-         train_strategy='baseline'):
+         train_strategy='baseline',
+         add_features_name=None):
 
     logger.info('\n==========================================\n'
                 '   Now, the test section is beginning!!!   \n'
@@ -57,17 +58,17 @@ def test(model: nn.Module,
         average_score, average_pred_in_targ, average_top1_in_pred \
             = evaluate_top_scores(model, gpu, test_data_processor, smiles2graph_dic=smiles2graph_dic,
                                   ratio=0.25, batch_size=batch_size, smiles_list=smiles_list,
-                                  target_name='std'+target_name)
-        acc = pairwise_acc(model, gpu, test_data_processor, smiles2graph_dic, show_info=False,
-                           smiles_list=smiles_list, target_name='std'+target_name)
+                                  target_name='std'+target_name, add_features_name=add_features_name)
+        # acc = pairwise_acc(model, gpu, test_data_processor, smiles2graph_dic, show_info=False,
+        #                    smiles_list=smiles_list, target_name='std'+target_name)
     else:
         acc = pairwise_baseline_acc(model, gpu, test_data_processor, smiles2graph_dic, batch_size=500,
                                     show_info=True, smiles_list=None, target_name='std' + target_name)
 
     print('==========================================')
-    print(' Note：For test set pair accuracy: {:.4f}'.format(acc))
+    #print(' Note：For test set pair accuracy: {:.4f}'.format(acc))
     logger.info('\n==========================================\nNote：For test set average score is: {:.4f}'.format(average_score))
-    logger.info('\nNote：The accuracy is: {:.4f}\n'.format(acc))
+    #logger.info('\nNote：The accuracy is: {:.4f}\n'.format(acc))
     if train_strategy != 'baseline':
         print('   Note：For test set average score is:   ', average_score)
         # print('   Note：For test set average score3 is:   ', average_score3)
